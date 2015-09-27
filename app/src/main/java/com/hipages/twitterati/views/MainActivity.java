@@ -1,0 +1,253 @@
+package com.hipages.twitterati.views;
+
+import android.app.ListActivity;
+import android.content.Context;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.os.AsyncTask;
+import android.os.Bundle;
+import android.util.Base64;
+import android.util.Log;
+import android.widget.ListView;
+
+import com.google.gson.Gson;
+import com.hipages.twitterati.R;
+import com.hipages.twitterati.adapters.ListAdapter;
+import com.hipages.twitterati.models.Authenticated;
+import com.hipages.twitterati.models.SearchResults;
+import com.hipages.twitterati.models.Searches;
+
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpRequestBase;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.params.BasicHttpParams;
+
+import java.io.*;
+import java.net.URLEncoder;
+
+/**
+ * Demonstrates how to use a twitter application keys to search
+ */
+public class MainActivity extends ListActivity {
+
+    private static final String LIST_INSTANCE_STATE = "list_instance_state";
+	final static String SearchTerm = "hipages";
+	public final static String LOG_TAG = "HiPages_Log";
+	String Key = null;
+	String Secret = null;
+	private ListView mListView;
+	private Searches arrListSearches;
+
+
+	@Override
+	public void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+		setContentView(R.layout.activity_tweets);
+		try {
+			// Initialize
+			mListView = (ListView) findViewById(android.R.id.list);
+            if(savedInstanceState!=null) {
+                arrListSearches = savedInstanceState.getParcelable(LIST_INSTANCE_STATE);
+            }
+			Key = getStringFromManifest("CONSUMER_KEY");
+			Secret = getStringFromManifest("CONSUMER_SECRET");
+			downloadSearches();
+		} catch (Exception e) {
+			Log.e(LOG_TAG, getClass().getSimpleName() + " - onCreate - " +  e.toString());
+		}
+
+	}
+
+    private String getStringFromManifest(String key) {
+		String results = null;
+		try {
+			Context context = this.getBaseContext();
+			ApplicationInfo ai = context.getPackageManager().getApplicationInfo(context.getPackageName(), PackageManager.GET_META_DATA);
+			results = (String)ai.metaData.get(key);
+		} catch (PackageManager.NameNotFoundException e) {
+			Log.e(LOG_TAG, getClass().getSimpleName() + " - getStringFromManifest - " + e.toString());
+		}
+		return results;
+	}
+
+	// download twitter searches after first checking to see if there is a network connection
+	public void downloadSearches() {
+        try {
+            ConnectivityManager connMgr = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo networkInfo = connMgr.getActiveNetworkInfo();
+
+            if (networkInfo != null && networkInfo.isConnected()) {
+                new DownloadTwitterTask().execute(SearchTerm);
+            } else {
+                Log.v(LOG_TAG, "No network connection available.");
+            }
+        } catch (Exception e) {
+            Log.e(LOG_TAG, getClass().getSimpleName() + " - downloadSearches - " +  e.toString());
+        }
+	}
+
+	// Uses an AsyncTask to download data from Twitter
+	private class DownloadTwitterTask extends AsyncTask<String, Void, String> {
+		final static String TwitterTokenURL = "https://api.twitter.com/oauth2/token";
+		final static String TwitterSearchURL = "https://api.twitter.com/1.1/search/tweets.json?q=";
+
+		@Override
+		protected String doInBackground(String... searchTerms) {
+			String result = null;
+            try {
+                if (searchTerms.length > 0) {
+                    result = getSearchStream(searchTerms[0]);
+                }
+            } catch (Exception e) {
+                Log.e(LOG_TAG, getClass().getSimpleName() + " - doInBackground - " +  e.toString());
+            }
+			return result;
+		}
+
+		// onPostExecute convert the JSON results into a Twitter object (which is an Array list of tweets
+		@Override
+		protected void onPostExecute(String result) {
+            try {
+                arrListSearches = jsonToSearches(result);
+                // send the tweets to the adapter for rendering
+                ListAdapter listAdapter = new ListAdapter(arrListSearches, MainActivity.this);
+                mListView.setAdapter(listAdapter);
+            } catch (Exception e) {
+                Log.e(LOG_TAG, getClass().getSimpleName() + " - onPostExecute - " +  e.toString());
+            }
+		}
+
+		// converts a string of JSON data into a SearchResults object
+		private Searches jsonToSearches(String result) {
+			Searches searches = null;
+			if (result != null && result.length() > 0) {
+				try {
+					Gson gson = new Gson();
+					// bring back the entire search object
+					SearchResults sr = gson.fromJson(result, SearchResults.class);
+					// but only pass the list of tweets found (called statuses)
+					searches = sr.getStatuses();
+				} catch (IllegalStateException ex) {
+					// just eat the exception for now, but you'll need to add some handling here
+				}
+			}
+			return searches;
+		}
+
+		// convert a JSON authentication object into an Authenticated object
+		private Authenticated jsonToAuthenticated(String rawAuthorization) {
+			Authenticated auth = null;
+			if (rawAuthorization != null && rawAuthorization.length() > 0) {
+				try {
+					Gson gson = new Gson();
+					auth = gson.fromJson(rawAuthorization, Authenticated.class);
+				} catch (IllegalStateException ex) {
+					// just eat the exception for now, but you'll need to add some handling here
+				}
+			}
+			return auth;
+		}
+
+		private String getResponseBody(HttpRequestBase request) {
+			StringBuilder sb = new StringBuilder();
+			try {
+
+				DefaultHttpClient httpClient = new DefaultHttpClient(new BasicHttpParams());
+				HttpResponse response = httpClient.execute(request);
+				int statusCode = response.getStatusLine().getStatusCode();
+				String reason = response.getStatusLine().getReasonPhrase();
+
+				if (statusCode == 200) {
+
+					HttpEntity entity = response.getEntity();
+					InputStream inputStream = entity.getContent();
+
+					BufferedReader bReader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"), 8);
+					String line;
+					while ((line = bReader.readLine()) != null) {
+						sb.append(line);
+					}
+				} else {
+					sb.append(reason);
+				}
+			} catch (Exception e) {
+                Log.e(LOG_TAG, getClass().getSimpleName() + " - getResponseBody - " +  e.toString());
+			}
+			return sb.toString();
+		}
+
+		private String getStream(String url) {
+			String results = null;
+
+			// Step 1: Encode consumer key and secret
+			try {
+				// URL encode the consumer key and secret
+				String urlApiKey = URLEncoder.encode(Key, "UTF-8");
+				String urlApiSecret = URLEncoder.encode(Secret, "UTF-8");
+
+				// Concatenate the encoded consumer key, a colon character, and the encoded consumer secret
+				String combined = urlApiKey + ":" + urlApiSecret;
+
+				// Base64 encode the string
+				String base64Encoded = Base64.encodeToString(combined.getBytes(), Base64.NO_WRAP);
+
+				// Step 2: Obtain a bearer token
+				HttpPost httpPost = new HttpPost(TwitterTokenURL);
+				httpPost.setHeader("Authorization", "Basic " + base64Encoded);
+				httpPost.setHeader("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8");
+				httpPost.setEntity(new StringEntity("grant_type=client_credentials"));
+				String rawAuthorization = getResponseBody(httpPost);
+				Authenticated auth = jsonToAuthenticated(rawAuthorization);
+
+				// Applications should verify that the value associated with the
+				// token_type key of the returned object is bearer
+				if (auth != null && auth.token_type.equals("bearer")) {
+
+					// Step 3: Authenticate API requests with bearer token
+					HttpGet httpGet = new HttpGet(url);
+
+					// construct a normal HTTPS request and include an Authorization
+					// header with the value of Bearer <>
+					httpGet.setHeader("Authorization", "Bearer " + auth.access_token);
+					httpGet.setHeader("Content-Type", "application/json");
+					// update the results with the body of the response
+					results = getResponseBody(httpGet);
+				}
+			} catch (UnsupportedEncodingException ex) {
+                Log.e(LOG_TAG, getClass().getSimpleName() + " - onSaveInstanceState - " +  ex.toString());
+			} catch (IllegalStateException ex1) {
+                Log.e(LOG_TAG, getClass().getSimpleName() +  ex1.toString());
+			}
+			return results;
+		}
+
+		private String getSearchStream(String searchTerm) {
+			String results = null;
+			try {
+				String encodedUrl = URLEncoder.encode(searchTerm, "UTF-8");
+				results = getStream(TwitterSearchURL + encodedUrl);
+			} catch (UnsupportedEncodingException ex) {
+                Log.e(LOG_TAG, getClass().getSimpleName() + " - getSearchStream - " +  ex.toString());
+			} catch (IllegalStateException ex1) {
+                Log.e(LOG_TAG, getClass().getSimpleName() +  ex1.toString());
+			}
+			return results;
+		}
+	}
+
+    protected void onResume() {
+        super.onResume();
+        arrListSearches = (Searches) getLastNonConfigurationInstance();
+    }
+
+    @Override
+    public Object onRetainNonConfigurationInstance() {
+        return arrListSearches;
+    }
+}

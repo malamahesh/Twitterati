@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.hipages.twitterati" >
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher">
+        <activity android:name=".views.MainActivity"
+            android:label="@string/app_name"
+            android:configChanges="keyboardHidden|orientation|screenSize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <meta-data android:name="CONSUMER_KEY" android:value="6q55Kxq6rf3GPmdb6gwhi6h4x" ></meta-data>
+        <meta-data android:name="CONSUMER_SECRET" android:value="OznlKMGmRsBQZe3tzUD3ZIJQBfvV79mBGSobqxG5hbFAfeximQ" ></meta-data>
+    </application>
+</manifest>
